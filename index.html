@@ -1,20 +1,97 @@
 <!doctype html>
 <body>
-<input type="file" multiple onchange="showFile(this)">
+<input type="file" multiple onchange="getLocationExif(this)">
 
 <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
+<script src="https://cdn.jsdelivr.net/npm/geolib@3.3.1/lib/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gpx-builder@3.6.5/dist/index.min.js"></script>
 
 <script>
-function showFile(input) {
-  let files = input.files;
-
-  Array.from(files).forEach(file => {
-    console.log('file', file);
-    EXIF.getData(file, function() {
-      var allMetaData = EXIF.getAllTags(this);
-      console.log('allMetaData', allMetaData);
-    });
+const readFile = async (file) => new Promise(resolve => {
+  EXIF.getData(file, function() {
+    resolve(EXIF.getAllTags(this));
   });
+});
+
+const readFiles = async (files) => Promise.all(Array.from(files).map(readFile));
+
+const gatherData = (point) => ({
+  altitude: point.GPSAltitude,
+  time: point.DateTime,
+  latitude: point.GPSLatitude,
+  latitudeRef: point.GPSLatitudeRef,
+  longitude: point.GPSLongitude,
+  longitudeRef: point.GPSLongitudeRef,
+})
+
+const formatDate = ({ time, ...rest }) => {
+  const str = time.split(" ");
+  //get date part and replace ':' with '-'
+  const dateStr = str[0].replace(/:/g, "-");
+  //concat the strings (date and time part)
+  const properDateStr = dateStr + " " + str[1];
+  //pass to Date
+  const date = new Date(properDateStr);
+
+  return {
+    ...rest,
+    time: date,
+  };
+};
+
+const makeSexagesimal = (coordinate, direction) => {
+  const [degrees, minutes, seconds] = coordinate;
+  return `${degrees}° ${minutes}' ${seconds}" ${direction}`;
+}
+
+const getDecimalCoordinate = (coordinate, direction) => {
+  const sexagesimal = makeSexagesimal(coordinate, direction);
+  return geolib.sexagesimalToDecimal(sexagesimal);
+}
+
+const convertCoordinatesToDecimal = (point) => {
+  const { latitude, latitudeRef, longitude, longitudeRef, ...rest } = point;
+  const lat = getDecimalCoordinate(latitude, latitudeRef);
+  const long = getDecimalCoordinate(longitude, longitudeRef);
+
+  return {
+    ...rest,
+    gps: [lat, long],
+  };
+}
+
+const sortByDate = (a, b) => a.time - b.time;
+
+const convertToGpx = (positionJson) => {
+  // todo, repackage everything so we have this package, because it doesn't currently have GarminBuilder
+  const { buildGPX, GarminBuilder } = window;
+  const { Point } = GarminBuilder.MODELS;
+
+  const points = positionJson.map(positionPoint => {
+    const { altitude, gps, time } = positionPoint;
+    const [lat, long] = gps;
+
+    return new Point(lat, long, { ele: altitude, time });
+  });
+  
+  const gpxData = new GarminBuilder();
+  gpxData.setSegmentPoints(points);
+  return buildGPX(gpxData.toObject());
+};
+
+async function getLocationExif(input) {
+  const files = input.files;
+
+  const metadata = await readFiles(files);
+
+  const positionJson = metadata.map(gatherData)
+  .map(formatDate)
+  .sort(sortByDate)
+  .map(convertCoordinatesToDecimal);
+
+  const gpx = convertToGpx(positionJson);
+
+  console.log('gpx', gpx);
 }
 </script>
 </body>
