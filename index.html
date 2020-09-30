@@ -1,0 +1,20 @@
+<!doctype html>
+<body>
+<input type="file" multiple onchange="showFile(this)">
+
+<script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
+
+<script>
+function showFile(input) {
+  let files = input.files;
+
+  Array.from(files).forEach(file => {
+    console.log('file', file);
+    EXIF.getData(file, function() {
+      var allMetaData = EXIF.getAllTags(this);
+      console.log('allMetaData', allMetaData);
+    });
+  });
+}
+</script>
+</body>
